@@ -14,6 +14,8 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     const initializeAuth = async () => {
       try {
+        console.log('🔐 AuthContext - Initializing auth...');
+        
         // Check localStorage first
         let storedAuth = localStorage.getItem(AUTH_STORAGE_KEY);
         
@@ -22,12 +24,13 @@ export const AuthProvider = ({ children }) => {
           storedAuth = sessionStorage.getItem(AUTH_STORAGE_KEY);
         }
         
-        console.log('AuthContext - Stored auth:', storedAuth);
+        console.log('🔐 AuthContext - Stored auth found:', !!storedAuth);
         if (storedAuth) {
           const { user: storedUser, token } = JSON.parse(storedAuth);
-          console.log('AuthContext - Parsed user:', storedUser);
-          console.log('AuthContext - User name:', storedUser?.name);
-          console.log('AuthContext - User keys:', storedUser ? Object.keys(storedUser) : 'No user');
+          console.log('🔐 AuthContext - Parsed user:', storedUser);
+          console.log('🔐 AuthContext - User name:', storedUser?.name);
+          console.log('🔐 AuthContext - User keys:', storedUser ? Object.keys(storedUser) : 'No user');
+          console.log('🔐 AuthContext - Token found:', !!token);
           
           // Validate stored data
           if (storedUser && token) {
@@ -36,11 +39,13 @@ export const AuthProvider = ({ children }) => {
             
             // Set initial user data without waiting for API call
             setUser({ ...storedUser, token });
+            console.log('🔐 AuthContext - User set from storage');
             
             // Try to refresh user data from database in background (non-blocking)
             try {
+              console.log('🔐 AuthContext - Attempting to refresh user data...');
               const freshUserData = await authApi.getProfile();
-              console.log('Fresh user data loaded:', freshUserData);
+              console.log('🔐 Fresh user data loaded:', freshUserData);
               
               const authData = {
                 user: freshUserData,
@@ -50,25 +55,36 @@ export const AuthProvider = ({ children }) => {
               
               localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authData));
               setUser({ ...freshUserData, token });
+              console.log('🔐 AuthContext - User data refreshed successfully');
             } catch (refreshError) {
-              console.warn('Could not refresh user data, clearing invalid token:', refreshError);
-              // Clear invalid token and stored data
-              localStorage.removeItem('token');
-              localStorage.removeItem(AUTH_STORAGE_KEY);
-              sessionStorage.removeItem(AUTH_STORAGE_KEY);
-              setUser(null);
-              setError('Session expired. Please login again.');
-              return; // Stop execution
+              console.warn('🔐 Could not refresh user data, keeping stored data:', refreshError);
+              // Don't clear the token on refresh error - it might be a network issue
+              if (refreshError.message?.includes('401') || refreshError.message?.includes('unauthorized')) {
+                console.warn('🔐 Token appears to be invalid, clearing auth');
+                // Clear invalid token and stored data
+                localStorage.removeItem('token');
+                localStorage.removeItem(AUTH_STORAGE_KEY);
+                sessionStorage.removeItem(AUTH_STORAGE_KEY);
+                setUser(null);
+                setError('Session expired. Please login again.');
+                return; // Stop execution
+              } else {
+                // Network error or other issue - keep the stored data
+                console.warn('🔐 Network or server error, keeping stored auth data');
+              }
             }
           } else {
+            console.warn('🔐 Invalid stored auth data, clearing');
             // Clear invalid data
             localStorage.removeItem(AUTH_STORAGE_KEY);
             sessionStorage.removeItem(AUTH_STORAGE_KEY);
             localStorage.removeItem('token');
           }
+        } else {
+          console.log('🔐 No stored auth found');
         }
       } catch (err) {
-        console.error('Auth initialization error:', err);
+        console.error('🔐 Auth initialization error:', err);
         setError('Failed to initialize authentication');
         // Clear corrupted data
         localStorage.removeItem(AUTH_STORAGE_KEY);
@@ -76,6 +92,7 @@ export const AuthProvider = ({ children }) => {
         localStorage.removeItem('token');
       } finally {
         setIsLoading(false);
+        console.log('🔐 AuthContext - Initialization complete, loading:', false);
       }
     };
 

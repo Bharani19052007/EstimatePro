@@ -9,6 +9,16 @@ const auth = require("../middleware/auth");
 // Import PDF generation libraries
 const { jsPDF } = require('jspdf');
 
+// Import Excel library
+let XLSX;
+try {
+  XLSX = require('xlsx');
+  console.log('✅ XLSX library loaded successfully');
+} catch (error) {
+  console.error('❌ Failed to load XLSX library:', error);
+  XLSX = null;
+}
+
 // Middleware to verify JWT token
 router.use(auth);
 
@@ -96,32 +106,81 @@ router.post("/data", async (req, res) => {
     // Generate report content based on format
     let reportContent;
     let contentType = 'text/plain';
+    let fileName = `report-${reportType}-${new Date().toISOString().split('T')[0].replace(/:/g, '-')}`;
 
     switch (format) {
       case 'csv':
         reportContent = generateCSVReport(reportType, dateRange, reportData);
         contentType = 'text/csv';
-        res.setHeader('Content-Disposition', `attachment; filename="report-${reportType}-${new Date().toISOString().split('T')[0].replace(/:/g, '-')}.csv"`);
+        fileName = `report-${reportType}-${new Date().toISOString().split('T')[0].replace(/:/g, '-')}.csv`;
+        console.log('📊 CSV report generated, size:', reportContent ? reportContent.length : 'null');
+        console.log('📊 CSV content preview:', reportContent ? reportContent.substring(0, 200) : 'null');
         break;
       case 'excel':
-        reportContent = generateExcelReport(reportType, dateRange, reportData);
-        contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-        res.setHeader('Content-Disposition', `attachment; filename="report-${reportType}-${new Date().toISOString().split('T')[0].replace(/:/g, '-')}.xlsx"`);
-        break;
+        console.log('📊 Starting Excel generation...');
+        try {
+          reportContent = generateExcelReport(reportType, dateRange, reportData);
+          contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+          fileName = `report-${reportType}-${new Date().toISOString().split('T')[0].replace(/:/g, '-')}.xlsx`;
+          console.log('📊 Excel report generated, size:', reportContent ? reportContent.length : 'null');
+          break;
+        } catch (excelError) {
+          console.error('❌ Excel generation failed:', excelError);
+          console.error('❌ Excel error stack:', excelError.stack);
+          // Fallback to CSV
+          console.log('📊 Falling back to CSV format');
+          reportContent = generateCSVReport(reportType, dateRange, reportData);
+          contentType = 'text/csv';
+          fileName = `report-${reportType}-${new Date().toISOString().split('T')[0].replace(/:/g, '-')}.csv`;
+          break;
+        }
       case 'pdf':
         reportContent = generatePDFReport(reportType, dateRange, reportData);
         contentType = 'application/pdf';
+        fileName = `report-${reportType}-${new Date().toISOString().split('T')[0].replace(/:/g, '-')}.pdf`;
+        console.log('📄 PDF generated, size:', reportContent ? reportContent.byteLength : 'null');
         break;
       default:
         reportContent = generateTextReport(reportType, dateRange, reportData);
         contentType = 'text/plain';
+        fileName = `report-${reportType}-${new Date().toISOString().split('T')[0].replace(/:/g, '-')}.txt`;
     }
 
     res.set('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="report-${reportType}-${new Date().toISOString().split('T')[0].replace(/:/g, '-')}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
     
-    console.log('📄 Sending PDF with filename:', `report-${reportType}-${new Date().toISOString().split('T')[0].replace(/:/g, '-')}.pdf`);
-    res.send(reportContent);
+    console.log('📄 Sending file with filename:', fileName);
+    console.log('📄 Content type:', contentType);
+    console.log('📄 Report content type:', typeof reportContent);
+    
+    // Special handling for different formats
+    if (format === 'pdf') {
+      if (!reportContent) {
+        console.error('❌ PDF content is null or undefined');
+        return res.status(500).json({
+          success: false,
+          error: "Failed to generate PDF content"
+        });
+      }
+      console.log('📄 PDF content length:', reportContent.length || reportContent.byteLength);
+      
+      // Convert ArrayBuffer to Buffer properly
+      const pdfBuffer = Buffer.isBuffer(reportContent) ? reportContent : Buffer.from(reportContent);
+      res.send(pdfBuffer);
+    } else if (format === 'excel') {
+      console.log('📊 Excel content length:', reportContent.length);
+      // Excel is now a proper binary buffer
+      const excelBuffer = Buffer.isBuffer(reportContent) ? reportContent : Buffer.from(reportContent);
+      res.send(excelBuffer);
+    } else if (format === 'csv') {
+      console.log('📄 CSV content length:', reportContent.length);
+      // CSV is text, send directly
+      res.send(reportContent);
+    } else {
+      console.log('📄 Text content length:', reportContent.length);
+      // Text format, send directly
+      res.send(reportContent);
+    }
   } catch (error) {
     console.error("Error generating report data:", error);
     res.status(500).json({
@@ -501,151 +560,191 @@ function generateTextReport(reportType, dateRange, data) {
 function generatePDFReport(reportType, dateRange, data) {
   try {
     console.log('📄 Generating PDF report:', { reportType, dateRange });
-    const doc = new jsPDF();
+    const doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4'
+    });
     const timestamp = new Date().toLocaleString();
-  
-  // Add title
-  doc.setFontSize(20);
-  doc.text('Project Estimation Report', 20, 20);
-  
-  doc.setFontSize(12);
-  doc.text(`Generated: ${timestamp}`, 20, 30);
-  doc.text(`Report Type: ${reportType}`, 20, 40);
-  doc.text(`Date Range: ${dateRange}`, 20, 50);
-  
-  let yPosition = 70;
-  
-  switch (reportType) {
-    case 'overview':
-      doc.setFontSize(16);
-      doc.text('OVERVIEW REPORT', 20, yPosition);
-      yPosition += 15;
-      
-      doc.setFontSize(12);
-      doc.text(`Total Revenue: $${(data.totalRevenue || 0).toLocaleString()}`, 20, yPosition);
-      yPosition += 10;
-      doc.text(`Active Projects: ${data.activeProjects || 0}`, 20, yPosition);
-      yPosition += 10;
-      doc.text(`Team Members: ${data.teamMembers || 0}`, 20, yPosition);
-      yPosition += 10;
-      doc.text(`Avg Project Value: $${Math.round(data.avgProjectValue || 0).toLocaleString()}`, 20, yPosition);
-      yPosition += 20;
-      
-      if (data.projectCostsOverTime && data.projectCostsOverTime.length > 0) {
-        doc.setFontSize(14);
-        doc.text('PROJECT COSTS OVER TIME', 20, yPosition);
-        yPosition += 10;
+    
+    // Set up page margins
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 20;
+    let yPosition = margin;
+    
+    // Add title
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Project Estimation Report', margin, yPosition);
+    yPosition += 15;
+    
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Generated: ${timestamp}`, margin, yPosition);
+    yPosition += 10;
+    doc.text(`Report Type: ${reportType}`, margin, yPosition);
+    yPosition += 10;
+    doc.text(`Date Range: ${dateRange}`, margin, yPosition);
+    yPosition += 15;
+    
+    switch (reportType) {
+      case 'overview':
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(16);
+        doc.text('OVERVIEW REPORT', margin, yPosition);
+        yPosition += 15;
         
-        data.projectCostsOverTime.forEach(item => {
-          doc.setFontSize(10);
-          doc.text(`${item.name}: $${(item.costs || 0).toLocaleString()} (${item.projects || 0} projects)`, 25, yPosition);
-          yPosition += 8;
-        });
-      }
-      break;
-
-    case 'financial':
-      doc.setFontSize(16);
-      doc.text('FINANCIAL REPORT', 20, yPosition);
-      yPosition += 15;
-      
-      if (data.revenueBreakdown && data.revenueBreakdown.length > 0) {
-        doc.setFontSize(14);
-        doc.text('REVENUE BREAKDOWN', 20, yPosition);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(12);
+        doc.text(`Total Revenue: $${(data.totalRevenue || 0).toLocaleString()}`, margin, yPosition);
         yPosition += 10;
+        doc.text(`Active Projects: ${data.activeProjects || 0}`, margin, yPosition);
+        yPosition += 10;
+        doc.text(`Team Members: ${data.teamMembers || 0}`, margin, yPosition);
+        yPosition += 10;
+        doc.text(`Avg Project Value: $${Math.round(data.avgProjectValue || 0).toLocaleString()}`, margin, yPosition);
+        yPosition += 20;
         
-        data.revenueBreakdown.forEach(item => {
-          doc.setFontSize(10);
-          doc.text(`${item.period}: $${(item.amount || 0).toLocaleString()} (${item.projectCount || 0} projects)`, 25, yPosition);
-          yPosition += 8;
-        });
-      }
-      
-      if (data.projectProfitability && data.projectProfitability.length > 0) {
-        yPosition += 10;
-        doc.setFontSize(14);
-        doc.text('PROJECT PROFITABILITY', 20, yPosition);
-        yPosition += 10;
-        
-        data.projectProfitability.forEach(item => {
-          doc.setFontSize(10);
-          doc.text(`${item.projectName}:`, 25, yPosition);
-          yPosition += 6;
-          doc.text(`  Revenue: $${(item.revenue || 0).toLocaleString()}`, 30, yPosition);
-          yPosition += 6;
-          doc.text(`  Cost: $${(item.cost || 0).toLocaleString()}`, 30, yPosition);
-          yPosition += 6;
-          doc.text(`  Profit: $${(item.profit || 0).toLocaleString()}`, 30, yPosition);
-          yPosition += 6;
-          doc.text(`  Margin: ${item.margin || 0}%`, 30, yPosition);
+        if (data.projectCostsOverTime && data.projectCostsOverTime.length > 0) {
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(14);
+          doc.text('PROJECT COSTS OVER TIME', margin, yPosition);
           yPosition += 10;
-        });
-      }
-      break;
+          
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(10);
+          data.projectCostsOverTime.forEach(item => {
+            doc.text(`${item.name}: $${(item.costs || 0).toLocaleString()} (${item.projects || 0} projects)`, margin + 5, yPosition);
+            yPosition += 8;
+          });
+        }
+        break;
 
-    case 'resources':
-      doc.setFontSize(16);
-      doc.text('RESOURCES REPORT', 20, yPosition);
-      yPosition += 15;
-      
-      if (data.teamPerformance && data.teamPerformance.length > 0) {
-        doc.setFontSize(14);
-        doc.text('TEAM PERFORMANCE', 20, yPosition);
-        yPosition += 10;
+      case 'financial':
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(16);
+        doc.text('FINANCIAL REPORT', margin, yPosition);
+        yPosition += 15;
         
-        data.teamPerformance.forEach(member => {
-          doc.setFontSize(10);
-          doc.text(`${member.name} (${member.role}):`, 25, yPosition);
-          yPosition += 6;
-          doc.text(`  Projects: ${member.projects || 0}`, 30, yPosition);
-          yPosition += 6;
-          doc.text(`  Hours: ${member.hours || 0}`, 30, yPosition);
-          yPosition += 6;
-          doc.text(`  Efficiency: ${member.efficiency || 0}%`, 30, yPosition);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(12);
+        
+        if (data.revenueBreakdown && data.revenueBreakdown.length > 0) {
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(14);
+          doc.text('REVENUE BREAKDOWN', margin, yPosition);
           yPosition += 10;
-        });
-      }
-      break;
+          
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(10);
+          data.revenueBreakdown.forEach(item => {
+            doc.text(`${item.period}: $${(item.amount || 0).toLocaleString()} (${item.projectCount || 0} projects)`, margin + 5, yPosition);
+            yPosition += 8;
+          });
+        }
+        
+        if (data.projectProfitability && data.projectProfitability.length > 0) {
+          yPosition += 10;
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(14);
+          doc.text('PROJECT PROFITABILITY', margin, yPosition);
+          yPosition += 10;
+          
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(10);
+          data.projectProfitability.forEach(item => {
+            doc.text(`${item.projectName}:`, margin, yPosition);
+            yPosition += 6;
+            doc.text(`  Revenue: $${(item.revenue || 0).toLocaleString()}`, margin + 5, yPosition);
+            yPosition += 6;
+            doc.text(`  Cost: $${(item.cost || 0).toLocaleString()}`, margin + 5, yPosition);
+            yPosition += 6;
+            doc.text(`  Profit: $${(item.profit || 0).toLocaleString()}`, margin + 5, yPosition);
+            yPosition += 6;
+            doc.text(`  Margin: ${item.margin || 0}%`, margin + 5, yPosition);
+            yPosition += 10;
+          });
+        }
+        break;
 
-    case 'projects':
-      doc.setFontSize(16);
-      doc.text('PROJECTS REPORT', 20, yPosition);
-      yPosition += 15;
-      
-      if (data.projectStatus && data.projectStatus.length > 0) {
-        doc.setFontSize(14);
-        doc.text('PROJECT STATUS OVERVIEW', 20, yPosition);
-        yPosition += 10;
+      case 'resources':
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(16);
+        doc.text('RESOURCES REPORT', margin, yPosition);
+        yPosition += 15;
         
-        data.projectStatus.forEach(status => {
-          doc.setFontSize(10);
-          doc.text(`${status.status}: ${status.count || 0} (${status.percentage || 0}%)`, 25, yPosition);
-          yPosition += 8;
-        });
-      }
-      
-      if (data.recentProjects && data.recentProjects.length > 0) {
-        yPosition += 10;
-        doc.setFontSize(14);
-        doc.text('RECENT PROJECTS', 20, yPosition);
-        yPosition += 10;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(12);
         
-        data.recentProjects.forEach(project => {
-          doc.setFontSize(10);
-          doc.text(`${project.name}:`, 25, yPosition);
-          yPosition += 6;
-          doc.text(`  Status: ${project.status}`, 30, yPosition);
-          yPosition += 6;
-          doc.text(`  Budget: $${(project.budget || 0).toLocaleString()}`, 30, yPosition);
-          yPosition += 6;
-          doc.text(`  Actual: $${(project.actual || 0).toLocaleString()}`, 30, yPosition);
+        if (data.teamPerformance && data.teamPerformance.length > 0) {
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(14);
+          doc.text('TEAM PERFORMANCE', margin, yPosition);
           yPosition += 10;
-        });
-      }
-      break;
-  }
+          
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(10);
+          data.teamPerformance.forEach(member => {
+            doc.text(`${member.name} (${member.role}):`, margin, yPosition);
+            yPosition += 6;
+            doc.text(`  Projects: ${member.projects || 0}`, margin + 5, yPosition);
+            yPosition += 6;
+            doc.text(`  Hours: ${member.hours || 0}`, margin + 5, yPosition);
+            yPosition += 6;
+            doc.text(`  Efficiency: ${member.efficiency || 0}%`, margin + 5, yPosition);
+            yPosition += 10;
+          });
+        }
+        break;
+
+      case 'projects':
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(16);
+        doc.text('PROJECTS REPORT', margin, yPosition);
+        yPosition += 15;
+        
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(12);
+        
+        if (data.projectStatus && data.projectStatus.length > 0) {
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(14);
+          doc.text('PROJECT STATUS OVERVIEW', margin, yPosition);
+          yPosition += 10;
+          
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(10);
+          data.projectStatus.forEach(status => {
+            doc.text(`${status.status}: ${status.count || 0} (${status.percentage || 0}%)`, margin + 5, yPosition);
+            yPosition += 8;
+          });
+        }
+        
+        if (data.recentProjects && data.recentProjects.length > 0) {
+          yPosition += 10;
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(14);
+          doc.text('RECENT PROJECTS', margin, yPosition);
+          yPosition += 10;
+          
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(10);
+          data.recentProjects.forEach(project => {
+            doc.text(`${project.name}:`, margin, yPosition);
+            yPosition += 6;
+            doc.text(`  Status: ${project.status}`, margin + 5, yPosition);
+            yPosition += 6;
+            doc.text(`  Budget: $${(project.budget || 0).toLocaleString()}`, margin + 5, yPosition);
+            yPosition += 6;
+            doc.text(`  Actual: $${(project.actual || 0).toLocaleString()}`, margin + 5, yPosition);
+            yPosition += 10;
+          });
+        }
+        break;
+    }
   
-  return doc.output('arraybuffer');
+    return doc.output('arraybuffer');
   } catch (error) {
     console.error('❌ PDF Generation Error:', error);
     throw error;
@@ -718,10 +817,122 @@ function generateCSVReport(reportType, dateRange, data) {
   return csvContent;
 }
 
-// Generate Excel report (simplified version - returns CSV format for now)
+// Generate Excel report using xlsx library
 function generateExcelReport(reportType, dateRange, data) {
-  // For now, return CSV format (can be enhanced with proper Excel library later)
-  return generateCSVReport(reportType, dateRange, data);
+  try {
+    if (!XLSX) {
+      console.error('❌ XLSX library not available, falling back to CSV');
+      return generateCSVReport(reportType, dateRange, data);
+    }
+    
+    console.log('📊 Generating Excel report with XLSX library');
+    
+    let worksheetData = [];
+    
+    // Add header row
+    worksheetData.push(['Report Type', reportType]);
+    worksheetData.push(['Date Range', dateRange]);
+    worksheetData.push(['Generated', new Date().toLocaleString()]);
+    worksheetData.push([]);
+    
+    switch (reportType) {
+      case 'overview':
+        worksheetData.push(['OVERVIEW REPORT']);
+        worksheetData.push(['Metric', 'Value']);
+        worksheetData.push(['Total Revenue', data.totalRevenue || 0]);
+        worksheetData.push(['Active Projects', data.activeProjects || 0]);
+        worksheetData.push(['Team Members', data.teamMembers || 0]);
+        worksheetData.push(['Avg Project Value', data.avgProjectValue || 0]);
+        
+        if (data.projectCostsOverTime && data.projectCostsOverTime.length > 0) {
+          worksheetData.push([]);
+          worksheetData.push(['PROJECT COSTS OVER TIME']);
+          worksheetData.push(['Period', 'Amount', 'Project Count']);
+          data.projectCostsOverTime.forEach(item => {
+            worksheetData.push([item.period, item.amount || 0, item.projectCount || 0]);
+          });
+        }
+        break;
+        
+      case 'financial':
+        worksheetData.push(['FINANCIAL REPORT']);
+        worksheetData.push(['Metric', 'Value']);
+        worksheetData.push(['Total Revenue', data.totalRevenue || 0]);
+        worksheetData.push(['Total Costs', data.totalCosts || 0]);
+        worksheetData.push(['Net Profit', data.netProfit || 0]);
+        worksheetData.push(['Profit Margin', `${data.profitMargin || 0}%`]);
+        
+        if (data.revenueBreakdown && data.revenueBreakdown.length > 0) {
+          worksheetData.push([]);
+          worksheetData.push(['REVENUE BREAKDOWN']);
+          worksheetData.push(['Period', 'Amount', 'Project Count']);
+          data.revenueBreakdown.forEach(item => {
+            worksheetData.push([item.period, item.amount || 0, item.projectCount || 0]);
+          });
+        }
+        break;
+        
+      case 'resources':
+        worksheetData.push(['RESOURCES REPORT']);
+        worksheetData.push(['Team Performance']);
+        worksheetData.push(['Name', 'Role', 'Projects', 'Hours', 'Efficiency']);
+        
+        if (data.teamPerformance && data.teamPerformance.length > 0) {
+          data.teamPerformance.forEach(member => {
+            worksheetData.push([
+              member.name || '',
+              member.role || '',
+              member.projects || 0,
+              member.hours || 0,
+              `${member.efficiency || 0}%`
+            ]);
+          });
+        }
+        break;
+        
+      case 'projects':
+        worksheetData.push(['PROJECTS REPORT']);
+        worksheetData.push(['Project Status']);
+        worksheetData.push(['Status', 'Count', 'Percentage']);
+        
+        if (data.projectStatus && data.projectStatus.length > 0) {
+          data.projectStatus.forEach(status => {
+            worksheetData.push([
+              status.status || '',
+              status.count || 0,
+              `${status.percentage || 0}%`
+            ]);
+          });
+        }
+        break;
+        
+      default:
+        worksheetData.push(['Report Data']);
+        worksheetData.push(['Key', 'Value']);
+        Object.entries(data).forEach(([key, value]) => {
+          if (typeof value !== 'object' || value === null) {
+            worksheetData.push([key, value]);
+          }
+        });
+    }
+    
+    // Create workbook and worksheet
+    const ws = XLSX.utils.aoa_to_sheet(worksheetData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Report');
+    
+    // Generate buffer
+    const excelBuffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    
+    console.log('✅ Excel report generated successfully, size:', excelBuffer.length);
+    return excelBuffer;
+  } catch (error) {
+    console.error('❌ Excel Generation Error:', error);
+    console.error('❌ Error stack:', error.stack);
+    // Fallback to CSV if Excel generation fails
+    console.log('📊 Falling back to CSV format');
+    return generateCSVReport(reportType, dateRange, data);
+  }
 }
 
 module.exports = router;

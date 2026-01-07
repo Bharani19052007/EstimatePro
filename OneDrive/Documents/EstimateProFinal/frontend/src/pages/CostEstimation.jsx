@@ -88,7 +88,7 @@ const CostEstimation = () => {
         category: 'software', // Default category since it's not stored in estimation
         priority: 'medium', // Default priority since it's not stored in estimation
         estimatedDuration: estimation.timeline?.totalDuration || estimation.teamSize || 1,
-        startDate: estimation.timeline?.startDate ? new Date(estimation.timeline.startDate).toISOString().split('T')[0] : '',
+        startDate: estimation.projectId?.startDate ? new Date(estimation.projectId.startDate).toISOString().split('T')[0] : '',
         endDate: estimation.timeline?.endDate ? new Date(estimation.timeline.endDate).toISOString().split('T')[0] : '',
         status: estimation.status || 'draft',
         teamSize: estimation.teamSize || 1,

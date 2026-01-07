@@ -98,6 +98,7 @@ const Reports = () => {
       setIsExporting(true);
       console.log(`Generating ${format} report for ${reportType}`);
       
+      // First, generate and download the report
       const report = await reportsApi.generateReport(reportType, dateRange, format);
       console.log('Report generated successfully:', report);
       
@@ -126,6 +127,11 @@ const Reports = () => {
       }
       
       // Create download link
+      console.log('📄 Creating blob with type:', mimeType);
+      console.log('📄 Report data type:', typeof report);
+      console.log('📄 Report data length:', report ? report.length || report.byteLength : 'null');
+      console.log('📄 Report data preview:', typeof report === 'string' ? report.substring(0, 100) : 'Binary data');
+      
       const blob = new Blob([report], { type: mimeType });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -136,6 +142,23 @@ const Reports = () => {
       a.click();
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
+      
+      console.log('📄 File downloaded:', fileName);
+      
+      // Then save report to database (in background, don't wait for it)
+      try {
+        const reportData = await reportsApi.getReportData(reportType, dateRange);
+        await reportsApi.saveReport({
+          name: `${reportType.charAt(0).toUpperCase() + reportType.slice(1)} Report`,
+          type: reportType,
+          description: `Generated ${reportType} report for ${dateRange}`,
+          dateRange: dateRange,
+          data: reportData.data || reportData
+        });
+        console.log('📊 Report saved to database successfully');
+      } catch (saveError) {
+        console.error('Error saving report to database:', saveError);
+      }
       
       // Show success message
       toast.success(`${format.toUpperCase()} report downloaded successfully!`);

@@ -45,9 +45,20 @@ api.interceptors.response.use(
     console.log(`[API Response] ${response.config.method?.toUpperCase()} ${response.config.url}`, response.data);
     console.log(`[API Response Status] ${response.status}`, response.statusText);
     
-    // For reports endpoint, return data directly since backend doesn't wrap it in {success, data}
+    // For reports endpoint, handle binary data specially
     if (response.config.url?.includes('/reports/data')) {
-      console.log('📊 Reports endpoint detected, returning data directly');
+      console.log('📊 Reports endpoint detected');
+      console.log('📊 Response data type:', typeof response.data);
+      console.log('📊 Response config responseType:', response.config?.responseType);
+      
+      // For binary data (PDF, Excel) with arraybuffer responseType, return the raw data
+      if (response.config?.responseType === 'arraybuffer') {
+        console.log('📊 ArrayBuffer response detected, returning raw data');
+        return response.data;
+      }
+      
+      // For text data (CSV, Text), return the response directly
+      console.log('📊 Text response detected, returning response');
       return response;
     }
     
@@ -66,39 +77,51 @@ api.interceptors.response.use(
   (error) => {
     console.error('[API Response Error]', {
       url: error.config?.url,
+      method: error.config?.method,
       status: error.response?.status,
+      statusText: error.response?.statusText,
       data: error.response?.data,
       message: error.message
     });
     
-    // Handle network errors
-    if (error.code === 'ECONNABORTED') {
-      return Promise.reject(new Error('Request timeout. Please check your internet connection.'));
+    let errorMessage = 'An error occurred';
+    const status = error.response?.status;
+    const data = error.response?.data;
+    
+    // Extract error message from response
+    if (data?.error) {
+      errorMessage = data.error;
+    } else if (data?.message) {
+      errorMessage = data.message;
     }
     
-    // Handle server errors
-    if (error.response) {
-      const { status, data } = error.response;
-      let errorMessage = 'An error occurred';
+    // For reports endpoint, don't intercept errors - let them bubble up
+    if (error.config?.url?.includes('/reports/data')) {
+      console.log('📊 Reports endpoint error, letting it bubble up');
+      return Promise.reject(error);
+    }
+    
+    if (status === 401) {
+      // Handle unauthorized access
+      console.log('🚫 401 error detected, checking if we should clear auth...');
+      console.log('🚫 Request URL:', error.config?.url);
+      console.log('🚫 Request method:', error.config?.method);
       
-      if (data?.error) {
-        errorMessage = data.error;
-      } else if (data?.message) {
-        errorMessage = data.message;
-      }
-      
-      if (status === 401) {
-        // Handle unauthorized access
+      // Only clear auth if it's not a network issue or server error
+      // Check if this is a genuine auth error (not a server issue)
+      if (error.config?.url && !error.config.url.includes('/health')) {
+        console.log('🚫 Clearing auth and redirecting to login');
         localStorage.removeItem('token');
+        localStorage.removeItem('globetrotter_auth');
+        sessionStorage.removeItem('globetrotter_auth');
         window.location.href = '/login';
-        errorMessage = 'Your session has expired. Please log in again.';
+      } else {
+        console.log('🚫 401 on health check, not clearing auth');
       }
-      
-      return Promise.reject(new Error(errorMessage));
+      errorMessage = 'Your session has expired. Please log in again.';
     }
     
-    // Handle other errors
-    return Promise.reject(new Error('Network error. Please try again.'));
+    return Promise.reject(new Error(errorMessage));
   }
 );
 
@@ -375,7 +398,13 @@ export const projectApi = {
       const response = await api.get('/estimations', {
         params: { _t: Date.now() } // Cache-busting parameter
       });
-      return response; // Response interceptor already extracts the data
+      console.log('Raw API response for getAllEstimations:', response);
+      
+      // Ensure we return an array
+      const estimations = response || [];
+      console.log('Processed estimations:', estimations);
+      
+      return estimations;
     } catch (error) {
       console.error('Error fetching estimations:', error);
       return [];
@@ -540,13 +569,31 @@ export const projectApi = {
 
   generateReport: async (reportType, dateRange, format = 'txt') => {
     try {
+      // Configure axios for binary response
       const response = await api.post('/reports/data', { 
         reportType, 
         dateRange, 
         format,
         exportOnly: true 
+      }, {
+        responseType: (format === 'pdf' || format === 'excel') ? 'arraybuffer' : 'text'
       });
-      return response.data;
+      
+      console.log('📊 Raw response type:', typeof response);
+      console.log('📊 Response keys:', Object.keys(response || {}));
+      console.log('📊 Response config responseType:', response.config?.responseType);
+      
+      // Handle different response formats
+      if (response.config?.responseType === 'arraybuffer') {
+        console.log('📊 ArrayBuffer response detected');
+        return response.data;
+      } else if (response.data) {
+        console.log('📊 Using response.data');
+        return response.data;
+      } else {
+        console.log('📊 Using response directly');
+        return response;
+      }
     } catch (error) {
       console.error('Error generating report:', error);
       throw error;
@@ -646,6 +693,16 @@ export const reportsApi = {
   getAllReports: projectApi.getAllReports,
   getReportData: projectApi.getReportData,
   generateReport: projectApi.generateReport,
+  
+  saveReport: async (reportData) => {
+    try {
+      const response = await api.post('/reports', reportData);
+      return response.data;
+    } catch (error) {
+      console.error('Error saving report:', error);
+      throw error;
+    }
+  }
 };
 
 // Helper function to generate text-based reports

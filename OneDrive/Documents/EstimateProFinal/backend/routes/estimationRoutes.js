@@ -12,7 +12,7 @@ router.get("/", async (req, res) => {
   try {
     const userId = req.user.id;
     const estimations = await Estimation.find({ userId })
-      .populate('projectId', 'projectName status')
+      .populate('projectId', 'projectName status startDate client')
       .populate('createdBy', 'name email')
       .sort({ createdAt: -1 });
     
@@ -36,9 +36,12 @@ router.get("/:id", async (req, res) => {
     console.log("User ID:", req.user.id);
     
     const estimation = await Estimation.findById(req.params.id)
-      .populate('projectId', 'projectName status')
+      .populate('projectId', 'projectName status startDate client')
       .populate('userId', 'name email')
       .populate('createdBy', 'name email');
+    
+    console.log("Estimation found with resources:", estimation?.resources?.length || 0);
+    console.log("Resources data:", estimation?.resources);
     
     if (!estimation) {
       console.log("Estimation not found:", req.params.id);
@@ -91,9 +94,9 @@ router.post("/", async (req, res) => {
     } = req.body;
 
     console.log("Received estimation creation request:", JSON.stringify(req.body, null, 2));
-    console.log("TotalCost:", totalCost);
-    console.log("FinalCost:", finalCost);
-    console.log("CostBreakdown:", costBreakdown);
+    console.log("Duration received:", duration);
+    console.log("RiskLevel received:", riskLevel);
+    console.log("Client received:", client);
 
     // Create projectData object from individual fields
     const projectData = {
@@ -141,12 +144,10 @@ router.post("/", async (req, res) => {
         client: client ? {
           name: client,
           email: '',
-          phone: '',
           company: client
         } : {
           name: '',
           email: '',
-          phone: '',
           company: ''
         }
       });
@@ -212,6 +213,9 @@ router.post("/", async (req, res) => {
       updatedAt: new Date()
     });
 
+    console.log("Creating estimation with duration:", duration || 1);
+    console.log("Creating estimation with riskLevel:", riskLevel || 'medium');
+
     const savedEstimation = await newEstimation.save();
     console.log("Created estimation:", savedEstimation._id);
 
@@ -249,6 +253,14 @@ router.put("/:id", async (req, res) => {
       riskLevel
     } = req.body;
     
+    console.log("PUT estimation update request:", req.params.id);
+    console.log("User ID:", req.user.id);
+    console.log("Request body:", req.body);
+    console.log("Duration received:", duration);
+    console.log("RiskLevel received:", riskLevel);
+    console.log("ProjectData received:", projectData);
+    console.log("Resources received:", resources);
+    
     const estimation = await Estimation.findById(req.params.id);
     
     if (!estimation) {
@@ -263,6 +275,16 @@ router.put("/:id", async (req, res) => {
       return res.status(403).json({
         success: false,
         error: "Access denied"
+      });
+    }
+
+    // Update project client information if provided
+    if (projectData?.client) {
+      await Project.findByIdAndUpdate(estimation.projectId, {
+        $set: {
+          'client.name': projectData.client,
+          'client.company': projectData.client
+        }
       });
     }
 
@@ -318,7 +340,7 @@ router.put("/:id", async (req, res) => {
       req.params.id,
       updateData,
       { new: true, runValidators: true }
-    ).populate('projectId', 'projectName status')
+    ).populate('projectId', 'projectName status startDate client')
      .populate('createdBy', 'name email');
 
     console.log("Estimation updated successfully:", updatedEstimation);

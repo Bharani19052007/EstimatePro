@@ -16,6 +16,7 @@ import CostEstimation from "./pages/CostEstimation";
 import ResourceManagement from "./pages/ResourceManagement";
 import AddResource from "./pages/AddResource";
 import EditResource from "./pages/EditResource";
+import EstimationDashboard from "./pages/EstimationDashboard";
 import Reports from "./pages/Reports";
 import NotFound from "./pages/NotFound";
 
@@ -70,7 +71,8 @@ const App = () => {
               <Route path="/create-project/:id" element={<ProtectedRoute><CreateProject /></ProtectedRoute>} />
               <Route path="/project/:id" element={<ProtectedRoute><ProjectDetails /></ProtectedRoute>} />
               <Route path="/project/:id/edit" element={<ProtectedRoute><CreateProject /></ProtectedRoute>} />
-              <Route path="/estimation-dashboard" element={<Navigate to="/dashboard?tab=estimations" replace />} />
+              <Route path="/estimation-dashboard" element={<ProtectedRoute><EstimationDashboard /></ProtectedRoute>} />
+              <Route path="/dashboard?tab=estimations" element={<Navigate to="/estimation-dashboard" replace />} />
               <Route path="/cost-estimation" element={<ProtectedRoute><CostEstimation /></ProtectedRoute>} />
               <Route path="/cost-estimation/:id" element={<ProtectedRoute><CostEstimation /></ProtectedRoute>} />
               <Route path="/resource-management" element={<ProtectedRoute><ResourceManagement /></ProtectedRoute>} />

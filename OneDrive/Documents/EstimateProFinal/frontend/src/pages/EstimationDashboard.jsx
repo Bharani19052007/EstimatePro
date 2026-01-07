@@ -35,15 +35,62 @@ const EstimationDashboard = () => {
     avgEstimationTime: 0
   });
   const [isLoading, setIsLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState(null);
+
+  // Debug: Log authentication state
+  console.log('🔐 EstimationDashboard - User:', user);
+  console.log('🔐 EstimationDashboard - User authenticated:', !!user);
 
   useEffect(() => {
     fetchEstimationData();
   }, []);
 
+  // Add useEffect to handle page visibility changes (when user navigates back)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        fetchEstimationData();
+      }
+    };
+
+    // Also handle window focus events
+    const handleFocus = () => {
+      fetchEstimationData();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
+
   const fetchEstimationData = async () => {
     try {
       setIsLoading(true);
+      console.log('🔄 Fetching estimation data...');
+      console.log('🔍 Token in localStorage:', !!localStorage.getItem('token'));
+      console.log('🔍 Auth in localStorage:', !!localStorage.getItem('globetrotter_auth'));
+      
       const estimationsData = await estimationApi.getAllEstimations();
+      
+      console.log('Raw estimations data:', estimationsData);
+      console.log('Number of estimations:', estimationsData?.length || 0);
+      
+      // Debug: Check if estimations have proper IDs
+      if (estimationsData && estimationsData.length > 0) {
+        estimationsData.forEach((estimation, index) => {
+          console.log(`Estimation ${index}:`, {
+            _id: estimation._id,
+            id: estimation.id,
+            projectName: estimation.projectName
+          });
+        });
+      } else {
+        console.log('⚠️ No estimations data received');
+      }
       
       setEstimations(estimationsData || []);
       
@@ -58,7 +105,6 @@ const EstimationDashboard = () => {
       
       setStats(stats);
       console.log('Calculated stats:', stats);
-      console.log('Estimations data:', estimationsData);
     } catch (error) {
       console.error('Error fetching estimation data:', error);
     } finally {
@@ -86,12 +132,15 @@ const EstimationDashboard = () => {
   const handleDeleteEstimation = async (estimationId) => {
     if (window.confirm('Are you sure you want to delete this estimation? This action cannot be undone.')) {
       try {
+        setDeletingId(estimationId);
         await estimationApi.deleteEstimation(estimationId);
         // Refresh the estimations list
         fetchEstimationData();
       } catch (error) {
         console.error('Error deleting estimation:', error);
         // You could add a toast notification here
+      } finally {
+        setDeletingId(null);
       }
     }
   };
@@ -112,6 +161,11 @@ const EstimationDashboard = () => {
       <Navbar />
       
       <div className="container mx-auto px-4 py-8 pt-24">
+        {/* Debug indicator */}
+        <div className="fixed top-4 right-4 bg-green-500 text-white px-2 py-1 rounded text-xs z-50">
+          Estimations: {estimations.length} | Loading: {isLoading ? 'Yes' : 'No'} | Auth: {user ? 'Yes' : 'No'}
+        </div>
+        
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
@@ -219,7 +273,7 @@ const EstimationDashboard = () => {
                 ) : (
                   <div className="space-y-4">
                     {estimations.slice(0, 5).map((estimation) => (
-                      <div key={estimation.id} className="flex items-center justify-between p-4 border rounded-lg">
+                      <div key={estimation._id || estimation.id} className="flex items-center justify-between p-4 border rounded-lg">
                         <div className="flex-1">
                           <div className="flex items-center gap-3 mb-2">
                             <h4 className="font-semibold">{estimation.projectName}</h4>
@@ -228,7 +282,9 @@ const EstimationDashboard = () => {
                             </Badge>
                           </div>
                           <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                            <span>Client: {estimation.client}</span>
+                            <span>Client: {estimation.projectId?.client?.name || 'N/A'}</span>
+                            <span>•</span>
+                            <span>Start: {estimation.projectId?.startDate ? new Date(estimation.projectId.startDate).toLocaleDateString() : 'N/A'}</span>
                             <span>•</span>
                             <span>Created: {new Date(estimation.createdAt).toLocaleDateString()}</span>
                           </div>
@@ -245,18 +301,46 @@ const EstimationDashboard = () => {
                             {formatCurrency(estimation.finalCost || estimation.totalCost || 0)}
                           </div>
                           <div className="flex items-center gap-2">
-                          <Link to={`/cost-estimation/${estimation._id}`}>
+                          <Link to={`/cost-estimation/${estimation._id || estimation.id || '#'}`}>
                             <Button variant="outline" size="sm">
                               View Details
                             </Button>
                           </Link>
                           <Button 
-                            variant="outline" 
+                            variant="destructive" 
                             size="sm"
-                            onClick={() => handleDeleteEstimation(estimation._id)}
-                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            onClick={() => {
+                              const id = estimation._id || estimation.id;
+                              console.log('🗑️ Delete clicked for estimation:', estimation);
+                              console.log('🗑️ Using ID:', id);
+                              if (id) {
+                                handleDeleteEstimation(id);
+                              } else {
+                                console.error('❌ No valid ID found for estimation:', estimation);
+                                // Try to use the index as a fallback
+                                const index = estimations.findIndex(e => e === estimation);
+                                if (index !== -1) {
+                                  console.log('🗑️ Using index as fallback:', index);
+                                  alert(`Error: Cannot delete estimation - no valid ID found. Estimation index: ${index}`);
+                                } else {
+                                  alert('Error: Cannot delete estimation - no valid ID found');
+                                }
+                              }
+                            }}
+                            className="bg-red-600 hover:bg-red-700 text-white"
+                            disabled={deletingId === (estimation._id || estimation.id)}
                           >
-                            <Trash2 className="w-4 h-4" />
+                            {deletingId === (estimation._id || estimation.id) ? (
+                              <>
+                                <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white mr-1"></div>
+                                Deleting...
+                              </>
+                            ) : (
+                              <>
+                                <Trash2 className="w-4 h-4 mr-1" />
+                                Delete
+                              </>
+                            )}
                           </Button>
                         </div>
                         </div>

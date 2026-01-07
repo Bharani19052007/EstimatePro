@@ -34,7 +34,11 @@ const databaseConfig = {
   // MongoDB Compass connection string format
   compass: {
     uri: 'mongodb://127.0.0.1:27017/project-management',
-    options: {}
+    options: {
+      serverSelectionTimeoutMS: 10000,
+      socketTimeoutMS: 20000,
+      connectTimeoutMS: 10000
+    }
   }
 };
 
